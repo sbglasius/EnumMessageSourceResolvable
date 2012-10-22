@@ -1,22 +1,24 @@
 package dk.glasius.transformation
 
-import org.codehaus.groovy.ast.builder.AstBuilder
-import org.codehaus.groovy.ast.expr.ConstantExpression
-import org.codehaus.groovy.ast.expr.PropertyExpression
+import dk.glasius.annotations.EnumMessageSourceResolvable
+import org.codehaus.groovy.ast.stmt.BlockStatement
+import org.codehaus.groovy.ast.stmt.ReturnStatement
 import org.codehaus.groovy.control.CompilePhase
 import org.codehaus.groovy.control.SourceUnit
-import org.codehaus.groovy.transform.ASTTransformation
+import org.codehaus.groovy.transform.AbstractASTTransformation
 import org.codehaus.groovy.transform.GroovyASTTransformation
-import org.objectweb.asm.Opcodes
 import org.codehaus.groovy.ast.*
+import org.codehaus.groovy.ast.expr.*
+
+import static org.codehaus.groovy.ast.expr.MethodCallExpression.NO_ARGUMENTS
+import static org.codehaus.groovy.ast.expr.VariableExpression.THIS_EXPRESSION
 
 @GroovyASTTransformation(phase = CompilePhase.INSTRUCTION_SELECTION)
-class EnumMessageSourceResolvableTransformation implements ASTTransformation {
-
-	String prefix
-	String postfix
-	boolean shortName
-	DefaultNameCase defaultNameCase
+class EnumMessageSourceResolvableTransformation extends AbstractASTTransformation {
+	static final Class MY_CLASS = EnumMessageSourceResolvable.class;
+	static final ClassNode MY_TYPE = ClassHelper.make(MY_CLASS);
+	static final String MY_TYPE_NAME = "@" + MY_TYPE.getNameWithoutPackage();
+	private static final Object[] EMPTY_OBJECT_ARRAY = [] as Object[]
 
 
 	void visit(ASTNode[] nodes, SourceUnit sourceUnit) {
@@ -26,17 +28,19 @@ class EnumMessageSourceResolvableTransformation implements ASTTransformation {
 		AnnotationNode annotationNode = (AnnotationNode) nodes[0]
 		AnnotatedNode annotatedNode = (AnnotatedNode) nodes[1];
 
-		prefix = getConstantAnnotationParameter(annotationNode, 'prefix', String, '')
-		postfix = getConstantAnnotationParameter(annotationNode, 'postfix', String, '')
-		shortName = getConstantAnnotationParameter(annotationNode, 'shortName', Boolean, false)
-		defaultNameCase = getConstantAnnotationParameter(annotationNode, 'defaultNameCase', DefaultNameCase, DefaultNameCase.UPPER_CASE)
+		String prefix = getMemberStringValue(annotationNode, 'prefix')
+		String postfix = getMemberStringValue(annotationNode, 'postfix')
+		boolean shortName = memberHasValue(annotationNode, 'shortName', true)
+		DefaultNameCase defaultNameCase = getEnumAnnotationParam(annotationNode, 'defaultNameCase', DefaultNameCase, DefaultNameCase.UNCHANGED)
 		System.err.println()
 		System.err.println("Annotation settings. Prefix: ${prefix}, postfix: ${postfix}, shortName: ${shortName}, defaultNameCase: ${defaultNameCase}")
 
 		if(annotatedNode instanceof ClassNode) {
 			ClassNode classNode = (ClassNode) annotatedNode;
 			addInterface(classNode)
-			addMetodes(classNode)
+			addGetDefaultMessageMetod(classNode, defaultNameCase)
+			addGetCodesMetod(classNode, prefix, postfix, shortName)
+			addGetArgumentsMetod(classNode)
 		}
 	}
 
@@ -47,80 +51,71 @@ class EnumMessageSourceResolvableTransformation implements ASTTransformation {
 	}
 
 
-	private addMetodes(ClassNode source) {
-		List<ASTNode> methodes = new AstBuilder().buildFromSpec {
-			method('getDefaultMessage', Opcodes.ACC_PUBLIC, String) {
-				parameters {}
-				exceptions {}
-				block {
-					switch(defaultNameCase) {
-						case DefaultNameCase.CAPITALIZE:
-							owner.expression.addAll new AstBuilder().buildFromCode {
-								return "$name()".toLowerCase().capitalize()
-							}
-							break
-						case DefaultNameCase.LOWER_CASE:
-
-							owner.expression.addAll new AstBuilder().buildFromCode {
-								return "$name()".toLowerCase()
-							}
-							break
-						case DefaultNameCase.UPPER_CASE:
-							owner.expression.addAll new AstBuilder().buildFromCode {
-								return "$name()".toUpperCase()
-							}
-							break
-					}
-				}
-				annotations {}
-			}
-				block {
-					owner.expression.addAll new AstBuilder().buildFromCode {
-						[] as Object
-
-
-						method('getArguments', Opcodes.ACC_PUBLIC, Object[]) {
-							parameters {}
-							exceptions {}
-					}
-				}
-				annotations {}
-			}
-			method('getCodes', Opcodes.ACC_PUBLIC, String[]) {
-				parameters {}
-				exceptions {}
-				expression {
-					declaration {
-						variable "shortName"
-						token "="
-						constantExpression { shortName
-						}
-					}
-				}
-				block {
-					owner.expression.addAll new AstBuilder().buildFromCode {
-						def className = "${getClass().name}."
-						def enumName = name()
-						["$className$enumName", "$className${enumName.toLowerCase()}", shortName] as String[]
-					}
-				}
-				annotations {}
-			}
+	private addGetDefaultMessageMetod(ClassNode source, final defaultNameCase) {
+		def block = new BlockStatement()
+		def nameExpression = new MethodCallExpression(THIS_EXPRESSION, 'name', NO_ARGUMENTS)
+		def expression = nameExpression
+		switch(defaultNameCase) {
+			case DefaultNameCase.CAPITALIZE:
+				expression = new MethodCallExpression(nameExpression, 'toLowerCase', NO_ARGUMENTS)
+				expression = new MethodCallExpression(expression, 'capitalize', NO_ARGUMENTS)
+				break;
+			case DefaultNameCase.LOWER_CASE:
+				expression = new MethodCallExpression(nameExpression, 'toLowerCase', NO_ARGUMENTS)
+				break;
+			case DefaultNameCase.UPPER_CASE:
+				expression = new MethodCallExpression(nameExpression, 'toUpperCase', NO_ARGUMENTS)
+				break;
 		}
-		methodes.each { source.addMethod(it) }
+
+		block.addStatement(new ReturnStatement(expression))
+
+		def method = new MethodNode("getDefaultMessage", ACC_PUBLIC, ClassHelper.STRING_TYPE, Parameter.EMPTY_ARRAY, ClassNode.EMPTY_ARRAY, block)
+		System.err.println("${method.name} ${method.returnType.typeClass}")
+		source.addMethod(method)
 	}
 
 
-	static def getConstantAnnotationParameter(AnnotationNode node, String parameterName, Class type, defaultValue) {
+	private addGetArgumentsMetod(ClassNode source) {
+		def block = new BlockStatement()
+		def arrayExpression = new ArrayExpression(ClassHelper.make(Object), [])
+		block.addStatement(new ReturnStatement(arrayExpression))
+
+		def method = new MethodNode("getArguments", ACC_PUBLIC, arrayExpression.type, Parameter.EMPTY_ARRAY, ClassNode.EMPTY_ARRAY, block)
+		System.err.println("${method.name} ${method.returnType.typeClass}")
+		source.addMethod(method)
+	}
+
+
+	private addGetCodesMetod(ClassNode source, String prefix, String postfix, boolean shortName) {
+		def block = new BlockStatement()
+		def enumName = new MethodCallExpression(THIS_EXPRESSION, 'name', NO_ARGUMENTS)
+		def enumNameLowerCase = new MethodCallExpression(enumName, 'toLowerCase', NO_ARGUMENTS)
+		def className = new MethodCallExpression(new MethodCallExpression(THIS_EXPRESSION, 'getClass', NO_ARGUMENTS), shortName ? 'getSimpleName' : 'getName', NO_ARGUMENTS)
+
+		def expression = '${_class}.${_name}'
+		if(prefix) {
+			expression = prefix + '.' + expression
+		}
+		if(postfix) {
+			expression = expression + '.' + postfix
+		}
+		def upperCase = new GStringExpression('', [new ConstantExpression(''), new ConstantExpression('.')], [className, enumName])
+		def lowerCase = new GStringExpression('', [new ConstantExpression(''), new ConstantExpression('.')], [className, enumNameLowerCase])
+
+		def arrayExpression = new ArrayExpression(new ClassNode(String), [upperCase, lowerCase])
+		block.addStatement(new ReturnStatement(arrayExpression))
+
+		def method = new MethodNode("getCodes", ACC_PUBLIC, arrayExpression.type, Parameter.EMPTY_ARRAY, ClassNode.EMPTY_ARRAY, block)
+		System.err.println("${method.name} ${method.returnType.typeClass}")
+		source.addMethod(method)
+	}
+
+
+	private getEnumAnnotationParam(AnnotationNode node, String parameterName, Class type, defaultValue) {
 		def member = node.getMember(parameterName)
 		if(member) {
-			if(member instanceof ConstantExpression) {
-				try {
-					return member.value.asType(type)
-				} catch(e) {
-					throw new RuntimeException("Expecting ${type.name} value for ${parameterName} annotation parameter. Found $member")
-				}
-			} else if(member instanceof PropertyExpression) {
+			if(member instanceof PropertyExpression) {
 				try {
 					return Enum.valueOf(type, ((PropertyExpression) member).propertyAsString)
 				} catch(e) {

@@ -21,5 +21,5 @@ public @interface EnumMessageSourceResolvable {
 	boolean shortName() default false;
 
 
-	DefaultNameCase defaultNameCase() default DefaultNameCase.UPPER_CASE;
+	DefaultNameCase defaultNameCase() default DefaultNameCase.UNCHANGED;
 }
