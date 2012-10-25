@@ -18,8 +18,6 @@ class EnumMessageSourceResolvableTransformation extends AbstractASTTransformatio
 	static final Class MY_CLASS = EnumMessageSourceResolvable.class;
 	static final ClassNode MY_TYPE = ClassHelper.make(MY_CLASS);
 	static final String MY_TYPE_NAME = "@" + MY_TYPE.getNameWithoutPackage();
-	private static final Object[] EMPTY_OBJECT_ARRAY = [] as Object[]
-
 
 	void visit(ASTNode[] nodes, SourceUnit sourceUnit) {
 		if(!(nodes[0] instanceof AnnotationNode) || !(nodes[1] instanceof AnnotatedNode)) {
@@ -31,9 +29,7 @@ class EnumMessageSourceResolvableTransformation extends AbstractASTTransformatio
 		String prefix = getMemberStringValue(annotationNode, 'prefix')
 		String postfix = getMemberStringValue(annotationNode, 'postfix')
 		boolean shortName = memberHasValue(annotationNode, 'shortName', true)
-		DefaultNameCase defaultNameCase = getEnumAnnotationParam(annotationNode, 'defaultNameCase', DefaultNameCase, DefaultNameCase.UNCHANGED)
-		System.err.println()
-		System.err.println("Annotation settings. Prefix: ${prefix}, postfix: ${postfix}, shortName: ${shortName}, defaultNameCase: ${defaultNameCase}")
+		DefaultNameCase defaultNameCase = (DefaultNameCase)getEnumAnnotationParam(annotationNode, 'defaultNameCase', DefaultNameCase, DefaultNameCase.UNCHANGED)
 
 		if(annotatedNode instanceof ClassNode) {
 			ClassNode classNode = (ClassNode) annotatedNode;
@@ -53,27 +49,28 @@ class EnumMessageSourceResolvableTransformation extends AbstractASTTransformatio
 
 	private addGetDefaultMessageMetod(ClassNode source, final defaultNameCase) {
 		def block = new BlockStatement()
-		def nameExpression = new MethodCallExpression(THIS_EXPRESSION, 'name', NO_ARGUMENTS)
-		def expression = nameExpression
+		def expression
 		switch(defaultNameCase) {
 			case DefaultNameCase.CAPITALIZE:
-				expression = new MethodCallExpression(nameExpression, 'toLowerCase', NO_ARGUMENTS)
-				expression = new MethodCallExpression(expression, 'capitalize', NO_ARGUMENTS)
+				expression = makeMethods(THIS_EXPRESSION, ['name','toLowerCase','capitalize'])
 				break;
 			case DefaultNameCase.LOWER_CASE:
-				expression = new MethodCallExpression(nameExpression, 'toLowerCase', NO_ARGUMENTS)
+				expression = makeMethods(THIS_EXPRESSION, ['name','toLowerCase'])
 				break;
 			case DefaultNameCase.UPPER_CASE:
-				expression = new MethodCallExpression(nameExpression, 'toUpperCase', NO_ARGUMENTS)
+				expression = makeMethods(THIS_EXPRESSION, ['name','toUpperCase'])
 				break;
+			default:
+				expression = makeMethods(THIS_EXPRESSION, 'name')
 		}
 
 		block.addStatement(new ReturnStatement(expression))
 
 		def method = new MethodNode("getDefaultMessage", ACC_PUBLIC, ClassHelper.STRING_TYPE, Parameter.EMPTY_ARRAY, ClassNode.EMPTY_ARRAY, block)
-		System.err.println("${method.name} ${method.returnType.typeClass}")
 		source.addMethod(method)
 	}
+
+
 
 
 	private addGetArgumentsMetod(ClassNode source) {
@@ -82,33 +79,41 @@ class EnumMessageSourceResolvableTransformation extends AbstractASTTransformatio
 		block.addStatement(new ReturnStatement(arrayExpression))
 
 		def method = new MethodNode("getArguments", ACC_PUBLIC, arrayExpression.type, Parameter.EMPTY_ARRAY, ClassNode.EMPTY_ARRAY, block)
-		System.err.println("${method.name} ${method.returnType.typeClass}")
 		source.addMethod(method)
 	}
 
 
 	private addGetCodesMetod(ClassNode source, String prefix, String postfix, boolean shortName) {
 		def block = new BlockStatement()
-		def enumName = new MethodCallExpression(THIS_EXPRESSION, 'name', NO_ARGUMENTS)
-		def enumNameLowerCase = new MethodCallExpression(enumName, 'toLowerCase', NO_ARGUMENTS)
-		def className = new MethodCallExpression(new MethodCallExpression(THIS_EXPRESSION, 'getClass', NO_ARGUMENTS), shortName ? 'getSimpleName' : 'getName', NO_ARGUMENTS)
+		def enumName = makeMethods(THIS_EXPRESSION, 'name')
+		def enumNameLowerCase = makeMethods(enumName, 'toLowerCase')
+		def enumNameUpperCase = makeMethods(enumName, 'toUpperCase')
+		def className = makeMethods(THIS_EXPRESSION, ['getClass', shortName ? 'getSimpleName' : 'getName'])
 
-		def expression = '${_class}.${_name}'
-		if(prefix) {
-			expression = prefix + '.' + expression
+		if(prefix && !prefix.endsWith('.')) {
+			prefix += '.'
 		}
-		if(postfix) {
-			expression = expression + '.' + postfix
+		if(postfix && !postfix.startsWith('.')) {
+			postfix = '.' + postfix
 		}
-		def upperCase = new GStringExpression('', [new ConstantExpression(''), new ConstantExpression('.')], [className, enumName])
-		def lowerCase = new GStringExpression('', [new ConstantExpression(''), new ConstantExpression('.')], [className, enumNameLowerCase])
+		def prefixExpression = new ConstantExpression(prefix ?: '')
+		def dotExpression = new ConstantExpression('.')
+		def postfixExpression = new ConstantExpression(postfix ?: '')
+		def upperCase = makeGString(prefixExpression, dotExpression, postfixExpression, className, enumNameUpperCase)
+		def unchangedCase = makeGString(prefixExpression, dotExpression, postfixExpression, className, enumName)
+		def lowerCase = makeGString(prefixExpression, dotExpression, postfixExpression, className, enumNameLowerCase)
 
-		def arrayExpression = new ArrayExpression(new ClassNode(String), [upperCase, lowerCase])
+		def arrayExpression = new ArrayExpression(new ClassNode(String), [upperCase, unchangedCase, lowerCase])
 		block.addStatement(new ReturnStatement(arrayExpression))
 
 		def method = new MethodNode("getCodes", ACC_PUBLIC, arrayExpression.type, Parameter.EMPTY_ARRAY, ClassNode.EMPTY_ARRAY, block)
-		System.err.println("${method.name} ${method.returnType.typeClass}")
 		source.addMethod(method)
+	}
+
+
+	private GStringExpression makeGString(ConstantExpression prefixExpression, ConstantExpression dotExpression, ConstantExpression postfixExpression, MethodCallExpression className, MethodCallExpression enumNameUpperCase) {
+		def upperCase = new GStringExpression('', [prefixExpression, dotExpression, postfixExpression], [className, enumNameUpperCase])
+		upperCase
 	}
 
 
@@ -119,12 +124,22 @@ class EnumMessageSourceResolvableTransformation extends AbstractASTTransformatio
 				try {
 					return Enum.valueOf(type, ((PropertyExpression) member).propertyAsString)
 				} catch(e) {
-					throw new RuntimeException("Expecting ${type.name} value for ${parameterName} annotation parameter. Found $member")
+					throw new RuntimeException("Expecting ${type.name} value for ${parameterName} annotation parameter. Found $member",e)
 				}
 			} else {
 				throw new RuntimeException("Expecting ${type.name} value for ${parameterName} annotation parameter. Found $member")
 			}
 		}
 		return defaultValue
+	}
+
+	private MethodCallExpression makeMethods(Expression expression, def method) {
+		if(method instanceof List) {
+			return method.inject(expression) { Expression expr, String name ->
+				return new MethodCallExpression(expr, name, NO_ARGUMENTS)
+			}
+		} else {
+			return new MethodCallExpression(expression, (String)method, NO_ARGUMENTS)
+		}
 	}
 }

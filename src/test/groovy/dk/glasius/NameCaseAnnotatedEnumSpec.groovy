@@ -3,7 +3,7 @@ package dk.glasius
 import spock.lang.Specification
 import spock.lang.Unroll
 
-@Mixin(BaseTestClass)
+@Mixin(AnnotationTestHelper)
 class NameCaseAnnotatedEnumSpec extends Specification {
 	def setup() {
 		setUp()

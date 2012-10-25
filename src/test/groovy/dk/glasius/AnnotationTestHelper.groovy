@@ -11,7 +11,7 @@ import static org.junit.Assert.*;
  *
  * This class is borrowed from the GContracts project
  */
-class BaseTestClass {
+class AnnotationTestHelper {
 
   private static final int MAX_NESTED_EXCEPTIONS = 10;
 

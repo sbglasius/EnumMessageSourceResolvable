@@ -4,7 +4,7 @@ import spock.lang.Specification
 import org.springframework.context.MessageSourceResolvable
 
 
-@Mixin(BaseTestClass)
+@Mixin(AnnotationTestHelper)
 class DefaultAnnotatedEnumSpec extends Specification {
 	def setup() {
 		setUp()
@@ -59,8 +59,8 @@ class DefaultAnnotatedEnumSpec extends Specification {
 		def clazz = add_class_to_classpath(source)
 
 		then:
-		clazz.ONE.codes == ['dk.glasius.DefaultAnnotatedEnum.ONE', 'dk.glasius.DefaultAnnotatedEnum.one']
-		clazz.TWO.codes == ['dk.glasius.DefaultAnnotatedEnum.TWO', 'dk.glasius.DefaultAnnotatedEnum.two']
+		clazz.ONE.codes == ['dk.glasius.DefaultAnnotatedEnum.ONE','dk.glasius.DefaultAnnotatedEnum.ONE', 'dk.glasius.DefaultAnnotatedEnum.one']
+		clazz.TWO.codes == ['dk.glasius.DefaultAnnotatedEnum.TWO','dk.glasius.DefaultAnnotatedEnum.TWO', 'dk.glasius.DefaultAnnotatedEnum.two']
 	}
 
 
