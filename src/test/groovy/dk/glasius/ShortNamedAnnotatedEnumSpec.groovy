@@ -1,6 +1,7 @@
+package dk.glasius
+
 import spock.lang.Specification
 import spock.lang.Unroll
-import dk.glasius.AnnotationTestHelper
 
 @Mixin(AnnotationTestHelper)
 class ShortNamedAnnotatedEnumSpec extends Specification {
